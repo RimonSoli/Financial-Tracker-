@@ -150,7 +150,7 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 .pk{position:fixed;inset:0;z-index:30;background:rgb(0 0 0/.5);display:flex;align-items:flex-end;justify-content:center}
 .pk>div{background:var(--surface);width:100%;max-width:420px;max-height:94%;overflow:auto;border-radius:16px 16px 0 0;padding:16px 16px calc(18px + env(safe-area-inset-bottom,0px));display:grid;gap:12px}
 @media (min-width:640px){.pk{align-items:center}.pk>div{border-radius:16px}}
-.sv{position:relative;height:210px;border-radius:10px;touch-action:none;cursor:crosshair;background-image:linear-gradient(to top,#000,transparent),linear-gradient(to right,#fff,transparent)}
+.pksv{position:relative;height:210px;border-radius:10px;touch-action:none;cursor:crosshair;background-image:linear-gradient(to top,#000,transparent),linear-gradient(to right,#fff,transparent)}
 .hue{position:relative;height:22px;border-radius:11px;touch-action:none;cursor:pointer;background:linear-gradient(to right,#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00)}
 .th{position:absolute;width:22px;height:22px;border-radius:50%;border:3px solid #fff;box-shadow:0 0 0 1px rgb(0 0 0/.35),0 2px 6px rgb(0 0 0/.35);transform:translate(-50%,-50%);pointer-events:none}
 .hue .th{top:50%}
@@ -161,7 +161,7 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 .pal button{position:relative;aspect-ratio:1;max-width:100%;border-radius:8px;border:1px solid var(--line);padding:0}
 .pal button.on{box-shadow:0 0 0 2px var(--surface),0 0 0 4px var(--ink)}
 .pal button span{position:absolute;top:-6px;right:-6px;width:18px;height:18px;border-radius:50%;background:var(--ink);color:var(--bg);font-size:12px;line-height:18px}
-.sv:focus-visible,.hue:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.pksv:focus-visible,.hue:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
 .crow input[type=text]{flex:1;min-width:0;font:inherit;padding:7px 9px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
 .dots{display:flex;gap:2px;flex-wrap:wrap;margin-top:auto}
 .dot{width:6px;height:6px;border-radius:50%;background:var(--c-bill)}
@@ -272,7 +272,7 @@ th{font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;le
 <div class="sheet" id="sheet" hidden><div id="sheetBody"></div></div>
 <div class="pk" id="pk" hidden><div role="dialog" aria-modal="true" aria-labelledby="pkTitle">
   <div class="row between"><h2 id="pkTitle" style="font-size:20px">Choose a colour</h2><button class="x" data-act="pkCancel" aria-label="Close">×</button></div>
-  <div class="sv" id="pkSV" tabindex="0" role="slider" aria-label="Shade: left to right is more colour, top to bottom is darker"><span class="th" id="pkSVt"></span></div>
+  <div class="pksv" id="pkSV" tabindex="0" role="slider" aria-label="Shade: left to right is more colour, top to bottom is darker"><span class="th" id="pkSVt"></span></div>
   <div class="hue" id="pkH" tabindex="0" role="slider" aria-label="Hue" aria-valuemin="0" aria-valuemax="360"><span class="th" id="pkHt"></span></div>
   <div class="row wrapr"><span class="pv" title="Before and after"><i id="pvOld"></i><i id="pvNew"></i></span><input class="pkhex" id="pkHex" maxlength="7" aria-label="Hex colour code" spellcheck="false"><button class="btn sm" data-act="pkSave">Save to palette</button></div>
   <div><div class="row between" style="margin-bottom:6px"><span class="label">Saved colours</span><button class="btn link small" data-act="pkEdit" id="pkEditBtn">Edit</button></div><div class="pal" id="pkPal"></div></div>
