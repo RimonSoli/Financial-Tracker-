@@ -1,0 +1,28 @@
+{
+  "rules": {
+    "meta": {
+      "editor": {
+        ".read": "auth != null",
+        ".write": "auth != null && !data.exists() && newData.val() === auth.uid"
+      }
+    },
+    "state": {
+      ".read": "auth != null && (root.child('meta/editor').val() === auth.uid || root.child('viewers').child(auth.uid).exists())",
+      ".write": "auth != null && root.child('meta/editor').val() === auth.uid"
+    },
+    "requests": {
+      ".read": "auth != null && root.child('meta/editor').val() === auth.uid",
+      "$uid": {
+        ".write": "auth != null && (auth.uid === $uid || root.child('meta/editor').val() === auth.uid)",
+        ".validate": "newData.hasChildren(['name', 'at']) && newData.child('name').isString() && newData.child('name').val().length < 80"
+      }
+    },
+    "viewers": {
+      ".read": "auth != null && root.child('meta/editor').val() === auth.uid",
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null && root.child('meta/editor').val() === auth.uid"
+      }
+    }
+  }
+}
