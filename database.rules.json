@@ -4,24 +4,46 @@
       "editor": {
         ".read": "auth != null",
         ".write": "auth != null && !data.exists() && newData.val() === auth.uid"
+      },
+      "hasCode": {
+        ".read": "auth != null",
+        ".write": "auth != null && (root.child('meta/editor').val() === auth.uid || root.child('editors').child(auth.uid).exists())",
+        ".validate": "newData.isBoolean()"
       }
     },
+    "secret": {
+      "editorCode": {
+        ".write": "auth != null && (root.child('meta/editor').val() === auth.uid || root.child('editors').child(auth.uid).exists())",
+        ".validate": "newData.isString() && newData.val().length >= 6 && newData.val().length <= 64"
+      }
+    },
+    "editors": {
+      ".read": "auth != null && (root.child('meta/editor').val() === auth.uid || root.child('editors').child(auth.uid).exists())",
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null && ((auth != null && (root.child('meta/editor').val() === auth.uid || root.child('editors').child(auth.uid).exists())) || (auth.uid === $uid && !data.exists() && root.child('secret/editorCode').exists() && newData.child('code').val() === root.child('secret/editorCode').val()))"
+      }
+    },
+    "data": {
+      ".read": "auth != null && ((auth != null && (root.child('meta/editor').val() === auth.uid || root.child('editors').child(auth.uid).exists())) || root.child('viewers').child(auth.uid).exists())",
+      ".write": "auth != null && (root.child('meta/editor').val() === auth.uid || root.child('editors').child(auth.uid).exists())"
+    },
     "state": {
-      ".read": "auth != null && (root.child('meta/editor').val() === auth.uid || root.child('viewers').child(auth.uid).exists())",
-      ".write": "auth != null && root.child('meta/editor').val() === auth.uid"
+      ".read": "auth != null && ((auth != null && (root.child('meta/editor').val() === auth.uid || root.child('editors').child(auth.uid).exists())) || root.child('viewers').child(auth.uid).exists())",
+      ".write": "auth != null && (root.child('meta/editor').val() === auth.uid || root.child('editors').child(auth.uid).exists())"
     },
     "requests": {
-      ".read": "auth != null && root.child('meta/editor').val() === auth.uid",
+      ".read": "auth != null && (root.child('meta/editor').val() === auth.uid || root.child('editors').child(auth.uid).exists())",
       "$uid": {
-        ".write": "auth != null && (auth.uid === $uid || root.child('meta/editor').val() === auth.uid)",
+        ".write": "auth != null && (auth.uid === $uid || (auth != null && (root.child('meta/editor').val() === auth.uid || root.child('editors').child(auth.uid).exists())))",
         ".validate": "newData.hasChildren(['name', 'at']) && newData.child('name').isString() && newData.child('name').val().length < 80"
       }
     },
     "viewers": {
-      ".read": "auth != null && root.child('meta/editor').val() === auth.uid",
+      ".read": "auth != null && (root.child('meta/editor').val() === auth.uid || root.child('editors').child(auth.uid).exists())",
       "$uid": {
         ".read": "auth != null && auth.uid === $uid",
-        ".write": "auth != null && root.child('meta/editor').val() === auth.uid"
+        ".write": "auth != null && (root.child('meta/editor').val() === auth.uid || root.child('editors').child(auth.uid).exists())"
       }
     }
   }
