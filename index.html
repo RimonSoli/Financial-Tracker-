@@ -114,6 +114,9 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 .cardseg svg{color:var(--muted)}
 
 .chart svg{width:100%;height:auto;display:block}
+.chsvg{touch-action:pan-y;cursor:grab;user-select:none;-webkit-user-select:none}
+.chsvg.grab{cursor:grabbing}
+.chhint{margin-left:auto;font-size:11px}
 .chart .ax{fill:var(--muted);font:10px var(--f-mono)}
 
 .months{display:grid;gap:14px}
@@ -228,7 +231,6 @@ button.check{width:100%;border-left:0;border-right:0;border-bottom:0;background:
 .estlist{display:grid;gap:4px}
 .estrow{display:flex;align-items:center;gap:10px;width:100%;border:0;border-left:3px solid var(--est);border-radius:6px;background:var(--est-soft);color:var(--est);padding:8px 10px;text-align:left;font-size:14px}
 .estrow .num{font-weight:600}
-.moreb{justify-self:center}
 .erase{display:grid;gap:10px;padding:12px;border:1px solid var(--bad);border-radius:10px;background:var(--bad-soft)}
 .note-box{padding:10px 12px;border-radius:8px;background:var(--warn-soft);font-size:13px}
 .banner.undo{background:var(--bad-soft)}

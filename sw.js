@@ -2,7 +2,7 @@
 // App files: network first (so updates show up right away), falling back to the saved copy offline.
 // Fonts and the Firebase library: saved copy first, since those versions never change.
 // Live data from Firebase is never cached here; Firebase handles that itself.
-const CACHE = "cashflow-v4";
+const CACHE = "cashflow-v5";
 const SHELL = ["./", "index.html", "app.js", "sync.js", "firebase-config.js", "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png"];
 
 self.addEventListener("install", (e) => {

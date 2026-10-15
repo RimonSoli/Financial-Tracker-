@@ -85,7 +85,11 @@ function blankState(){
 const KEY='family-cashflow-cache',PREF='family-cashflow-prefs';
 const lsGet=k=>{try{return JSON.parse(localStorage.getItem(k))}catch(e){return null}};
 const lsSet=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}};
-const PREFS=Object.assign({theme:'system',dismissed:[],role:null,years:2},lsGet(PREF)||{});
+const PREFS=Object.assign({theme:'system',dismissed:[],role:null},lsGet(PREF)||{});
+const CUR_Y=P(TODAY).getFullYear();
+// Calendar range in years, set per device. Older versions stored "years ahead"; turn that into an end year.
+if(PREFS.yTo==null){PREFS.yFrom=CUR_Y;PREFS.yTo=PREFS.years?CUR_Y+(+PREFS.years||1):CUR_Y+1}
+delete PREFS.years;
 const HAS_CLOUD=!!(window.FIREBASE_CONFIG&&window.FIREBASE_CONFIG.apiKey&&!/^PASTE/.test(window.FIREBASE_CONFIG.apiKey));
 let S=lsGet(KEY);const HAD_CACHE=!!(S&&S.v>=2);
 if(!HAD_CACHE)S=sample();
@@ -104,7 +108,10 @@ const acctColor=a=>a&&a.type==='savings'?'var(--sav)':'var(--accent)';
 const payFromOf=c=>bankOf(c.payFrom)?c.payFrom:firstChk();
 const startBals=()=>{const o={};S.accounts.forEach(a=>o[a.id]=+a.bal||0);return o};
 const TH=()=>S.thresholds||{exp:1000,inc:10000};
-const YEARS=()=>Math.min(10,Math.max(1,+PREFS.years||2));
+const yFrom=()=>Math.min(CUR_Y+10,Math.max(CUR_Y,+PREFS.yFrom||CUR_Y));
+const yTo=()=>Math.min(CUR_Y+10,Math.max(yFrom(),+PREFS.yTo||CUR_Y+1));
+// First month shown: this month, or January of the "from" year when that year is still ahead.
+const calStart=()=>yFrom()>CUR_Y?yFrom()+'-01-01':mstart(TODAY);
 
 function migrate(){
   if(!S.tags)S.tags=[];if(!S.colors)S.colors={};if(!S.palette)S.palette=[];if(!S.cards)S.cards=[];if(!S.items)S.items=[];if(!S.estimates)S.estimates=[];
@@ -220,7 +227,7 @@ const annualEst=es=>{let t=0;const p=P(TODAY);for(let k=0;k<12;k++)t+=estMonth(e
 const evBal=e=>e.after?e.after[e.acct]:undefined;
 const evAcct=e=>e.transfer?acctName(e.item.acct)+' → '+acctName(e.item.to):acctName(e.acct);
 // Last day the calendar needs: the end of the last month shown, and at least 400 days out for the 12-month chart.
-function calEnd(){const t=P(TODAY),e=mend(ymd(t.getFullYear(),t.getMonth()+YEARS()*12-1,1)),m=add(TODAY,400);return e>m?e:m}
+function calEnd(){const e=yTo()+'-12-31',m=add(TODAY,400);return e>m?e:m}
 
 // ---------- notifications ----------
 function notes(){
@@ -239,7 +246,7 @@ function notes(){
 }
 
 // ---------- render ----------
-let tab='cal',calAcct='t',totMode='month',openCat=null,calPast=0,F,PF=null,N;
+let tab='cal',calAcct='t',totMode='month',openCat=null,F,N;
 const $=s=>document.querySelector(s);
 function renderStatus(){
   const el=$('#status');if(!el)return;
@@ -266,8 +273,6 @@ function render(){
   if(gated){$('#view').innerHTML=gateView();$('#undoBanner').hidden=true;return}
   if(!CAN()&&tab==='man')tab='cal';
   F=forecast(S.balanceDate,calEnd(),startBals());
-  const pastFrom=calPast?(()=>{const t=P(TODAY);return ymd(t.getFullYear(),t.getMonth()-calPast,1)})():null;
-  PF=pastFrom&&pastFrom<=S.balanceDate?forecast(add(pastFrom,-1),S.balanceDate,{}):null;
   N=notes();
   const t=F.daily[TODAY]||startBals();
   $('#hBal').textContent=money(sumBals(t)||0);
@@ -285,35 +290,87 @@ function render(){
   $('#banner').hidden=!S.example||!CAN()||!!S.undo;
   document.querySelectorAll('#tabs button').forEach(b=>b.setAttribute('aria-selected',b.dataset.tab===tab));
   $('#view').innerHTML={cal:vCal,up:vUp,tot:vTot,cards:vCards,man:vMan,set:vSet,nw:vNW}[tab]();
+  bindChart();
 }
 function netWorth(){const t=F&&F.daily[TODAY]||startBals(),bank=sumBals(t)||0,a=S.nw.assets.reduce((s,x)=>s+x.value,0)+bank,d=S.nw.debts.reduce((s,x)=>s+x.value,0);return{a,d,net:a-d,t}}
 
-function chart(){
-  const W=720,H=190,pl=46,pr=10,pt=14,pb=24,days=365,pts=[],chk=[];
+// ---------- balance chart ----------
+// Pinch or scroll to zoom, drag to move along the timeline. The view is rebuilt on every render,
+// so leaving the calendar and coming back always shows the next 12 months again.
+let CV=null;
+const CH={W:720,H:190,pl:46,pr:10,pt:14,pb:24};
+function chartData(){
   const single=calAcct!=='t'?bankOf(calAcct):null,chks=S.accounts.filter(a=>a.type==='checking');
-  for(let i=0;i<days;i++){const x=F.daily[add(TODAY,i)]||{};pts.push(val(x,calAcct)||0);chk.push(chks.reduce((s,a)=>s+(x[a.id]||0),0))}
-  const showChk=!single&&chks.length>0&&S.accounts.length>1;
-  const alA=single||(chks.length===1?chks[0]:null),al=alA?+alA.alert||0:null;
+  const n=Math.max(30,diff(TODAY,F.end)+1),dates=[],pts=[],chk=[];
+  for(let i=0;i<n;i++){const d=add(TODAY,i),x=F.daily[d]||{};dates.push(d);pts.push(val(x,calAcct)||0);chk.push(chks.reduce((s,a)=>s+(x[a.id]||0),0))}
+  const showChk=!single&&chks.length>0&&S.accounts.length>1,alA=single||(chks.length===1?chks[0]:null);
+  return{single,chks,dates,pts,chk,showChk,alA,al:alA?+alA.alert||0:null,n,start:0,span:Math.min(365,n)};
+}
+function chartTitle(){
+  if(CV.start===0&&CV.span===Math.min(365,CV.n))return 'Next 12 months';
+  const a=CV.dates[CV.start],b=CV.dates[CV.start+CV.span-1],y=s=>P(s).getFullYear();
+  return short(a)+(y(a)!==y(b)?', '+y(a):'')+' – '+short(b)+', '+y(b);
+}
+function chartSVG(){
+  const{W,H,pl,pr,pt,pb}=CH,{start,span,dates,showChk,al,alA,single,chks}=CV;
+  const step=Math.max(1,Math.ceil(span/500));          // draw at most ~500 points, however far out the view is
+  const idx=[];for(let i=start;i<start+span;i+=step)idx.push(i);if(idx[idx.length-1]!==start+span-1)idx.push(start+span-1);
+  const pts=idx.map(i=>CV.pts[i]),chk=idx.map(i=>CV.chk[i]);
   let mn=Math.min(...pts,...(showChk?chk:[]),0),mx=Math.max(...pts,...(showChk?chk:[]),al||0);const pad=(mx-mn)*.08||100;mn-=pad;mx+=pad;
   const raw=(mx-mn)/4,mag=Math.pow(10,Math.floor(Math.log10(raw))),nice=[1,2,2.5,5,10].map(m=>m*mag).find(s=>s>=raw);
-  const X=i=>pl+(W-pl-pr)*i/(days-1),Y=v=>pt+(H-pt-pb)*(1-(v-mn)/(mx-mn));
-  const path=a=>a.map((v,i)=>(i?'L':'M')+X(i).toFixed(1)+' '+Y(v).toFixed(1)).join('');
+  const X=i=>pl+(W-pl-pr)*(i-start)/Math.max(1,span-1),Y=v=>pt+(H-pt-pb)*(1-(v-mn)/(mx-mn));
+  const path=a=>a.map((v,k)=>(k?'L':'M')+X(idx[k]).toFixed(1)+' '+Y(v).toFixed(1)).join('');
   const line=path(pts),base=Y(Math.max(mn,0));
   let g='';for(let v=Math.ceil(mn/nice)*nice;v<=mx;v+=nice)g+='<line x1="'+pl+'" x2="'+(W-pr)+'" y1="'+Y(v)+'" y2="'+Y(v)+'" stroke="var(--line)"/><text class="ax" x="'+(pl-6)+'" y="'+(Y(v)+3)+'" text-anchor="end">'+kmoney(v)+'</text>';
-  let mt='';for(let i=0;i<days;i++){const d=add(TODAY,i);if(P(d).getDate()===1)mt+='<text class="ax" x="'+X(i)+'" y="'+(H-8)+'" text-anchor="middle">'+MON[P(d).getMonth()]+'</text><line x1="'+X(i)+'" x2="'+X(i)+'" y1="'+(H-pb)+'" y2="'+(H-pb+4)+'" stroke="var(--muted)"/>'}
-  const ser=showChk?chk:pts,li=ser.indexOf(Math.min(...ser)),lv=ser[li];
+  // Month ticks: every month when zoomed in, every few months when zoomed out. Years show on January.
+  const every=span<=450?1:span<=800?2:span<=1300?3:span<=2600?6:12;let mt='',lastX=-99;
+  for(let i=start;i<start+span;i++){const p=P(dates[i]);if(p.getDate()!==1||p.getMonth()%every)continue;const x=X(i);if(x-lastX<34)continue;lastX=x;
+    const lbl=p.getMonth()===0||span>800?MON[p.getMonth()]+(p.getMonth()===0||every>=6?" '"+String(p.getFullYear()).slice(2):''):MON[p.getMonth()];
+    mt+='<text class="ax" x="'+x+'" y="'+(H-8)+'" text-anchor="middle">'+lbl+'</text><line x1="'+x+'" x2="'+x+'" y1="'+(H-pb)+'" y2="'+(H-pb+4)+'" stroke="var(--muted)"/>'}
+  const ser=showChk?CV.chk:CV.pts;let li=start;for(let i=start;i<start+span;i++)if(ser[i]<ser[li])li=i;const lv=ser[li];
   const col=single?acctColor(single):'var(--accent)';
-  const chkLbl=chks.length===1?chks[0].name:'All checking';
-  const lowLbl=(single?single.name:showChk?chkLbl:'total').toLowerCase();
-  return '<div class="panel chart"><div class="row between" style="margin-bottom:6px"><h3>Next 12 months</h3><span class="label">'+(single?esc(single.name):'Total cash')+'</span></div>'+
-  '<svg viewBox="0 0 '+W+' '+H+'" role="img" aria-label="Projected balance over the next year">'+g+
+  const chkLbl=chks.length===1?chks[0].name:'All checking',lowLbl=(single?single.name:showChk?chkLbl:'total').toLowerCase();
+  return '<svg viewBox="0 0 '+W+' '+H+'" role="img" aria-label="Projected balance, '+esc(chartTitle())+'">'+g+
   (al!=null?'<line x1="'+pl+'" x2="'+(W-pr)+'" y1="'+Y(al)+'" y2="'+Y(al)+'" stroke="var(--warn)" stroke-dasharray="4 4"/>':'')+
-  '<path d="'+line+'L'+X(days-1)+' '+base+'L'+X(0)+' '+base+'Z" fill="'+col+'" fill-opacity=".12"/>'+
+  '<path d="'+line+'L'+X(start+span-1)+' '+base+'L'+X(start)+' '+base+'Z" fill="'+col+'" fill-opacity=".12"/>'+
   (showChk?'<path d="'+path(chk)+'" fill="none" stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="1 3" stroke-linecap="round"/>':'')+
   '<path d="'+line+'" fill="none" stroke="'+col+'" stroke-width="2" stroke-linejoin="round"/>'+
   '<circle cx="'+X(li)+'" cy="'+Y(lv)+'" r="4.5" fill="var(--bad)" stroke="var(--surface)" stroke-width="2"/>'+
-  '<text class="ax" x="'+Math.min(Math.max(X(li),pl+60),W-80)+'" y="'+Math.min(Y(lv)+16,H-pb-4)+'" text-anchor="middle" style="fill:var(--bad)">'+esc(lowLbl)+' low '+kmoney(lv)+' '+short(add(TODAY,li))+'</text>'+mt+'</svg>'+
-  '<div class="legend"><span><i style="background:'+col+'"></i>'+(single?esc(single.name):'Total')+'</span>'+(showChk?'<span><i style="background:var(--muted)"></i>'+esc(chkLbl)+' (dotted)</span>':'')+(al!=null?'<span><i style="background:var(--warn)"></i>'+esc(alA.name)+' alert '+money(al)+'</span>':'')+'</div></div>';
+  '<text class="ax" x="'+Math.min(Math.max(X(li),pl+60),W-80)+'" y="'+Math.min(Y(lv)+16,H-pb-4)+'" text-anchor="middle" style="fill:var(--bad)">'+esc(lowLbl)+' low '+kmoney(lv)+' '+short(dates[li])+'</text>'+mt+'</svg>';
+}
+function chart(){
+  CV=chartData();
+  const{single,showChk,chks,al,alA}=CV,col=single?acctColor(single):'var(--accent)',chkLbl=chks.length===1?chks[0].name:'All checking';
+  return '<div class="panel chart"><div class="row between wrapr" style="margin-bottom:6px;gap:4px 10px"><h3 id="chTitle">'+esc(chartTitle())+'</h3><span class="row" style="gap:8px"><button class="btn sm" data-act="chartReset" id="chReset" hidden>Back to 12 months</button><span class="label">'+(single?esc(single.name):'Total cash')+'</span></span></div>'+
+  '<div class="chsvg" id="chSvg">'+chartSVG()+'</div>'+
+  '<div class="legend"><span><i style="background:'+col+'"></i>'+(single?esc(single.name):'Total')+'</span>'+(showChk?'<span><i style="background:var(--muted)"></i>'+esc(chkLbl)+' (dotted)</span>':'')+(al!=null?'<span><i style="background:var(--warn)"></i>'+esc(alA.name)+' alert '+money(al)+'</span>':'')+'<span class="chhint">Pinch or scroll to zoom · drag to move</span></div></div>';
+}
+function redrawChart(){
+  const el=$('#chSvg');if(!el||!CV)return;el.innerHTML=chartSVG();
+  $('#chTitle').textContent=chartTitle();$('#chReset').hidden=CV.start===0&&CV.span===Math.min(365,CV.n);
+}
+let chartRaf=0;
+function setView(start,span){
+  span=Math.round(Math.min(CV.n,Math.max(30,span)));start=Math.round(Math.min(CV.n-span,Math.max(0,start)));
+  if(start===CV.start&&span===CV.span)return;CV.start=start;CV.span=span;
+  if(!chartRaf)chartRaf=requestAnimationFrame(()=>{chartRaf=0;redrawChart()});
+}
+// Turns a screen x position into a fraction across the plot area (0 = left edge of the line, 1 = right edge).
+function plotFrac(el,clientX){const r=el.getBoundingClientRect(),{W,pl,pr}=CH,x=(clientX-r.left)/r.width*W;return Math.min(1,Math.max(0,(x-pl)/(W-pl-pr)))}
+function bindChart(){
+  const el=$('#chSvg');if(!el||el._bound)return;el._bound=true;
+  const ptrs=new Map();let g=null;
+  const begin=()=>{const v=[...ptrs.values()];
+    if(v.length===1)g={kind:'pan',x0:v[0].x,start0:CV.start};
+    else if(v.length>=2){const[a,b]=v,mid=(a.x+b.x)/2,f=plotFrac(el,mid);g={kind:'pinch',d0:Math.max(10,Math.abs(a.x-b.x)),span0:CV.span,f,anchor:CV.start+f*(CV.span-1)}}};
+  el.addEventListener('pointerdown',e=>{if(e.pointerType==='mouse'&&e.button!==0)return;ptrs.set(e.pointerId,{x:e.clientX});try{el.setPointerCapture(e.pointerId)}catch(_){}begin();el.classList.add('grab')});
+  el.addEventListener('pointermove',e=>{if(!ptrs.has(e.pointerId)||!g)return;ptrs.get(e.pointerId).x=e.clientX;const v=[...ptrs.values()],r=el.getBoundingClientRect(),plotW=r.width*(CH.W-CH.pl-CH.pr)/CH.W;
+    if(g.kind==='pan'&&v.length===1)setView(g.start0-(v[0].x-g.x0)/plotW*(CV.span-1),CV.span);
+    else if(g.kind==='pinch'&&v.length>=2){const span=g.span0*g.d0/Math.max(10,Math.abs(v[0].x-v[1].x));const s=Math.min(CV.n,Math.max(30,span));setView(g.anchor-g.f*(s-1),s)}});
+  const end=e=>{ptrs.delete(e.pointerId);if(!ptrs.size){g=null;el.classList.remove('grab')}else begin()};
+  el.addEventListener('pointerup',end);el.addEventListener('pointercancel',end);el.addEventListener('lostpointercapture',end);
+  el.addEventListener('wheel',e=>{e.preventDefault();const f=plotFrac(el,e.clientX),anchor=CV.start+f*(CV.span-1);
+    const s=Math.min(CV.n,Math.max(30,CV.span*Math.exp((e.deltaY||e.deltaX)*0.0015)));setView(anchor-f*(s-1),s)},{passive:false});
 }
 function lowCls(x){if(!x)return'';
   if(calAcct==='t'){if(S.accounts.some(a=>(x[a.id]||0)<0))return'negb';return S.accounts.some(a=>(x[a.id]||0)<(+a.alert||0))?'low':''}
@@ -325,9 +382,8 @@ function calSegs(){
   (S.cards.length?'<div class="seg cardseg" role="group" aria-label="Card calendars">'+S.cards.map(c=>'<button data-act="calAcct" data-a="'+c.id+'" aria-pressed="'+(calAcct===c.id)+'">'+CARD_SVG+' '+esc(c.name)+'</button>').join('')+'</div>':'')+
   '</div><p class="muted small" style="margin:-4px 0 0">'+(cc?'Showing the '+esc(cc.name)+' calendar. Tap Total or an account to go back to your bank balances.':'Tap a day to see its balances, or a card to see its calendar.')+'</p>';
 }
-// The months shown: any earlier months the viewer asked for, this month, and the number of years set in Settings.
-function monthList(){const t=P(TODAY),out=[];for(let k=-calPast;k<YEARS()*12;k++)out.push(ymd(t.getFullYear(),t.getMonth()+k,1));return out}
-function earlierBtn(){return '<button class="btn moreb" data-act="earlier">Show 12 earlier months</button>'}
+// The months shown: from calStart() through December of the "to" year set in Settings.
+function monthList(){const out=[],end=yTo()+'-12-01';let d=calStart();while(d<=end){out.push(d);const p=P(d);d=ymd(p.getFullYear(),p.getMonth()+1,1)}return out}
 // One calendar day: up to three items as name + amount, the rest as dots.
 function dayCell(o){
   const srt=o.items.slice().sort((p,q)=>Math.abs(q.amt)-Math.abs(p.amt));
@@ -348,7 +404,7 @@ function vCal(){
   if(cc)return '<div class="stack">'+calSegs()+vCardBody(cc)+'</div>';
   if(calAcct!=='t'&&!bankOf(calAcct))calAcct='t';
   const byDate={},addEv=e=>{if(calAcct!=='t'&&e.d[calAcct]===undefined)return;(byDate[e.date]||(byDate[e.date]=[])).push(e)};
-  F.ev.forEach(addEv);if(PF)PF.ev.forEach(addEv);
+  F.ev.forEach(addEv);
   const ests=S.estimates.filter(e=>bankOf(e.acct)&&(calAcct==='t'||e.acct===calAcct));
   let h='';
   for(const ms of monthList()){const y=P(ms).getFullYear(),m=P(ms).getMonth(),n=dim(y,m),first=new Date(y,m,1).getDay(),me=mend(ms);
@@ -371,7 +427,7 @@ function vCal(){
   const th=TH();
   return '<div class="stack">'+calSegs()+chart()+
   '<div class="legend"><span><i style="background:var(--c-in)"></i>Income</span><span><i style="background:var(--c-bill)"></i>Bill</span><span><i style="background:var(--c-500)"></i>$500+</span><span><i style="background:var(--c-card)"></i>Card payment</span><span><i style="background:var(--c-xfer)"></i>Transfer</span>'+S.tags.map(t=>'<span><i style="background:'+esc(t.color)+'"></i>'+esc(t.name)+'</span>').join('')+'<span><i style="background:var(--big)"></i>Payment of '+money(th.exp)+' or more</span><span><i style="background:var(--bigin)"></i>Income of '+money(th.inc)+' or more</span><span><i style="background:var(--warn-soft);outline:1px solid var(--warn)"></i>Below an alert</span><button class="btn link small" data-act="tabTo" data-t="set" style="padding:0">Change colours</button></div>'+
-  earlierBtn()+'<div class="months">'+h+'</div></div>';
+  '<div class="months">'+h+'</div></div>';
 }
 function evRow(e,trough){
   const tg=e.item&&tagOf(e.item.tag);
@@ -423,7 +479,7 @@ function vCards(){
 function cardCharges(c,from,to){const out=[];for(const it of S.items)if(it.acct===c.id)for(const d of occ(it,from,to))out.push({d,id:it.id,name:it.name,a:amt(it,d),it});return out.sort((a,b)=>a.d<b.d?-1:1)}
 function vCardBody(c){
   const ests=S.estimates.filter(e=>e.acct===c.id),its=S.items.filter(i=>i.acct===c.id),pf=acctName(payFromOf(c));
-  const bills=(PF?PF.bills:[]).filter(b=>b.date<=S.balanceDate).concat(F.bills).filter(b=>b.card.id===c.id);
+  const bills=F.bills.filter(b=>b.card.id===c.id);
   const next=F.bills.filter(b=>b.card.id===c.id&&b.date>TODAY).sort((a,b)=>a.date<b.date?-1:1)[0];
   let h='';
   for(const ms of monthList()){const y=P(ms).getFullYear(),m=P(ms).getMonth(),n=dim(y,m),me=mend(ms);
@@ -446,7 +502,7 @@ function vCardBody(c){
   return '<div class="plastic"><div><div class="nm">'+esc(c.name)+'</div><div style="font-size:12px;opacity:.75">Closes the '+ord(+c.closeDay)+' · paid from '+esc(pf)+' '+c.delay+' days later</div></div><div class="num" style="font-size:16px">•• '+esc(c.last4)+'</div></div>'+
   '<div class="kpis"><div class="kpi"><div class="label">Next payment</div><div class="num">'+(next?money(next.total):'—')+'</div>'+(next?'<div class="muted small">from '+esc(pf)+' '+short(next.date)+'</div>':'')+'</div><div class="kpi"><div class="label">Recurring / mo</div><div class="num">'+money(its.reduce((s,i)=>s+annual(i),0)/12)+'</div></div><div class="kpi"><div class="label">Estimates / mo</div><div class="num">'+money(ests.reduce((s,e)=>s+estMonth(e,TODAY),0))+'</div></div></div>'+
   '<div class="legend"><span><i style="background:var(--sunk)"></i><i style="background:var(--accent-soft);margin-left:-3px"></i>Each shade is one billing period</span><span><b style="color:var(--accent);font-size:10px">START</b> / <b style="color:var(--accent);font-size:10px">CLOSE</b> period begins / ends</span><span><b style="color:var(--bad);font-size:10px">PAY</b> comes out of '+esc(pf)+'</span>'+S.tags.map(t=>'<span><i style="background:'+esc(t.color)+'"></i>'+esc(t.name)+'</span>').join('')+'<span><i style="background:var(--big)"></i>Charge of '+money(TH().exp)+' or more</span></div>'+
-  earlierBtn()+'<div class="months">'+h+'</div>';
+  '<div class="months">'+h+'</div>';
 }
 function vMan(){
   const byCat={};S.items.forEach(i=>(byCat[i.category]||(byCat[i.category]=[])).push(i));
@@ -481,7 +537,7 @@ function vSet(){
   const th=TH();
   return '<div class="stack"><button class="btn link" data-act="tabTo" data-t="cal" style="justify-self:start">← Back</button><h2 style="font-size:24px">Settings</h2>'+
   '<section class="panel stack"><h3>Appearance</h3><div class="seg" role="group" aria-label="Theme">'+[['system','Match device'],['light','Light'],['dark','Dark']].map(([k,l])=>'<button data-act="theme" data-v="'+k+'" aria-pressed="'+(S.theme===k)+'">'+l+'</button>').join('')+'</div><p class="muted small" style="margin:0">Theme is set separately on each device.</p></section>'+
-  '<section class="panel stack"><h3>Calendar</h3><div class="field" style="max-width:260px"><label for="calYears">Years to show ahead</label><select id="calYears">'+[1,2,3,4,5,6,7,8,9,10].map(n=>'<option value="'+n+'"'+(YEARS()===n?' selected':'')+'>'+n+' year'+(n>1?'s':'')+' ('+(n*12)+' months)</option>').join('')+'</select></div><p class="muted small" style="margin:0">To look back, tap <b>Show 12 earlier months</b> at the top of the calendar. This is set separately on each device.</p></section>'+
+  '<section class="panel stack"><h3>Calendar</h3><div class="fgrid" style="max-width:420px"><div class="field"><label for="calFrom">From year</label><select id="calFrom">'+yearOpts(yFrom(),CUR_Y)+'</select></div><div class="field"><label for="calTo">To year</label><select id="calTo">'+yearOpts(yTo(),yFrom())+'</select></div></div><p class="muted small" style="margin:0">The calendar shows '+mlabel(calStart())+' to December '+yTo()+'. It always starts at this month at the earliest. This is set separately on each device.</p></section>'+
   devicesSection()+(CAN()?
   '<section class="panel stack"><div><h3>Highlighted days</h3><p class="muted small" style="margin:4px 0 0">Days with one big payment turn orange, and days with one big income turn green, so they stand out as you scroll.</p></div><div class="fgrid"><div class="field"><label for="thExp">Orange: a payment of at least</label>'+moneyField('thExp',th.exp)+'</div><div class="field"><label for="thInc">Green: an income of at least</label>'+moneyField('thInc',th.inc)+'</div></div><div class="row"><button class="btn" data-act="saveTh">Save</button><span class="small pos" id="thMsg"></span></div></section>'+
   '<section class="panel stack"><div><h3>Colour tags</h3><p class="muted small" style="margin:4px 0 0">Give items a shared colour on the calendar, like one colour for all insurance. Assign a tag when you add or edit an item in Manage.</p></div><div>'+
@@ -495,6 +551,7 @@ function vSet(){
     (S.undo?'<div class="row wrapr"><button class="btn primary" data-act="undoErase">Undo the last erase</button></div>':'')+
     '<div class="row wrapr"><button class="btn" data-act="askErase" data-m="example">Replace with example data</button><button class="btn danger" data-act="askErase" data-m="blank">Start blank</button></div><div id="eraseBox" hidden></div></section></div>':'');
 }
+const yearOpts=(sel,min)=>{let o='';for(let y=min;y<=CUR_Y+10;y++)o+='<option value="'+y+'"'+(y===sel?' selected':'')+'>'+y+'</option>';return o};
 function devicesSection(){
   if(ROLE==='local')return '';
   const when2=t=>t?new Date(t).toLocaleDateString('en-CA',{month:'short',day:'numeric'}):'';
@@ -523,7 +580,7 @@ function sheetNotes(){
   '<p class="muted small" style="margin-bottom:0">Reminders come from each item’s "remind me" setting, card payments due within a week, and your low-balance alerts.</p>');
 }
 function sheetDay(d){
-  const evs=F.ev.filter(e=>e.date===d).concat(PF&&d<=S.balanceDate?PF.ev.filter(e=>e.date===d):[]),x=F.daily[d];
+  const evs=F.ev.filter(e=>e.date===d),x=F.daily[d];
   openSheet(head(P(d).toLocaleDateString('en-CA',{weekday:'long',month:'long',day:'numeric',year:'numeric'}))+
   (x?'<div class="kpis" style="margin-bottom:10px">'+S.accounts.map(a=>'<div class="kpi"><div class="label">'+esc(a.name)+'</div><div class="num">'+money(x[a.id]||0)+'</div></div>').join('')+'<div class="kpi"><div class="label">Total</div><div class="num">'+money(sumBals(x))+'</div></div></div><p class="muted small" style="margin:0 0 6px">Projected end-of-day balances.</p>':'<p class="muted">This day is before your last balance update, so only the scheduled items are shown.</p>')+
   '<div class="list">'+(evs.map(e=>evRow(e)).join('')||'<p class="muted">Nothing scheduled this day.</p>')+'</div>');
@@ -696,7 +753,7 @@ function applyPick(){
 }
 
 // ---------- events ----------
-const VIEW_ACTS=new Set(['notes','close','settings','tabTo','calAcct','day','cday','openCard','dismiss','dismissAll','mode','cat','theme','earlier']);
+const VIEW_ACTS=new Set(['notes','close','settings','tabTo','calAcct','day','cday','openCard','dismiss','dismissAll','mode','cat','theme','chartReset']);
 document.addEventListener('click',e=>{
   const t=e.target.closest('[data-act],[data-tab]');if(!t)return;
   if(t.dataset.tab){tab=t.dataset.tab;render();window.scrollTo({top:0});return}
@@ -706,7 +763,6 @@ document.addEventListener('click',e=>{
     settings:()=>{tab=tab==='set'?'cal':'set';render();window.scrollTo({top:0})},
     tabTo:()=>{tab=t.dataset.t;render();window.scrollTo({top:0})},
     calAcct:()=>{calAcct=t.dataset.a;render()},
-    earlier:()=>{const tt=P(TODAY),keep=ymd(tt.getFullYear(),tt.getMonth()-calPast,1).slice(0,7),pre=cardOf(calAcct)?'cm-':'mo-';calPast+=12;render();const el=document.getElementById(pre+keep);if(el)el.scrollIntoView({block:'start'})},
     day:()=>sheetDay(t.dataset.d),
     cday:()=>sheetCDay(t.dataset.d),
     openCard:()=>{calAcct=t.dataset.c;$('#sheet').hidden=true;tab='cal';render();const sec=t.dataset.m&&document.getElementById('cm-'+t.dataset.m.slice(0,7));if(sec)sec.scrollIntoView({block:'start'});else window.scrollTo({top:0})},
@@ -739,6 +795,7 @@ document.addEventListener('click',e=>{
     removeViewer:()=>{if(window.cloudRemoveViewer)window.cloudRemoveViewer(t.dataset.id)},
     removeEditor:()=>{if(window.cloudRemoveEditor)window.cloudRemoveEditor(t.dataset.id)},
     removeCode:()=>{if(window.cloudRemoveCode)window.cloudRemoveCode()},
+    chartReset:()=>{if(CV)setView(0,365)},
     pkCancel:closePicker,
     pkApply:applyPick,
     pkSave:()=>{const h=pkHex();if(!S.palette.includes(h)){S.palette.push(h);save()}pkUpd()},
@@ -785,7 +842,9 @@ document.addEventListener('input',e=>{const t=e.target;if(!t.dataset)return;
   if(t.id==='eraseIn'){const b=$('#eraseGo');if(b)b.disabled=t.value.trim().toUpperCase()!=='ERASE'}
   if(t.dataset.col){S.colors[t.dataset.col]=t.value;applyColors()}});
 document.addEventListener('change',e=>{const t=e.target;
-  if(t.id==='calYears'){PREFS.years=+t.value||2;lsSet(PREF,PREFS);render();return}
+  if(t.id==='calFrom'||t.id==='calTo'){
+    if(t.id==='calFrom'){PREFS.yFrom=+t.value;if(+PREFS.yTo<PREFS.yFrom)PREFS.yTo=PREFS.yFrom}else PREFS.yTo=Math.max(+t.value,yFrom());
+    lsSet(PREF,PREFS);render();return}
   if(!CAN())return;
   if(t.id==='fFreq'||t.id==='fType'||t.id==='fTag')syncForm();
   if(t.dataset.tagn){const g=tagOf(t.dataset.tagn);if(g&&t.value.trim()){g.name=t.value.trim();save();render()}}

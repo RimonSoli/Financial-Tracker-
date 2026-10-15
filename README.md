@@ -54,7 +54,7 @@ The main editor role is tied to the app's storage on that phone. If it's replace
 ## Files
 
 - `index.html` – page layout and styles
-- `app.js` – screens and the forecast engine
+- `app.js` – screens, the forecast engine and the zoomable balance chart
 - `sync.js` – Firebase sync, editors, passcode and view-only devices
 - `firebase-config.js` – which Firebase project to use (not a secret)
 - `database.rules.json` – server rules to paste into Firebase
